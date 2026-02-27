@@ -1,457 +1,350 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
+import React, { useState } from 'react';
+import { ArrowRight, Shield, ShieldAlert, ShieldCheck, AlertTriangle, Link2, Mail } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { analyzeURL, analyzeEmail, type AnalysisResult, type EmailAnalysisResult } from './services/geminiService';
 
-import React, { useState, useEffect } from 'react';
-import { 
-  ShieldAlert, 
-  ShieldCheck, 
-  Search, 
-  History, 
-  AlertTriangle, 
-  ExternalLink, 
-  Info, 
-  ArrowRight,
-  Shield,
-  Lock,
-  Globe,
-  Trash2,
-  CheckCircle2,
-  XCircle
-} from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
-import { analyzeURL, type AnalysisResult } from './services/geminiService';
+type Tab = 'url' | 'email';
 
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
+// Animated score counter
+function Counter({ to }: { to: number }) {
+  const [n, setN] = useState(0);
+  React.useEffect(() => {
+    let f: number;
+    const start = Date.now();
+    const dur = 1200;
+    const ease = (t: number) => 1 - Math.pow(1 - t, 3);
+    const tick = () => {
+      const t = Math.min((Date.now() - start) / dur, 1);
+      setN(Math.round(ease(t) * to));
+      if (t < 1) f = requestAnimationFrame(tick);
+    };
+    f = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(f);
+  }, [to]);
+  return <>{n}</>;
 }
 
-interface HistoryItem {
-  url: string;
-  result: AnalysisResult;
-  timestamp: number;
-}
+const scoreColor = (s: number) => s >= 70 ? '#f87171' : s >= 40 ? '#fbbf24' : '#34d399';
 
 export default function App() {
+  const [tab, setTab] = useState<Tab>('url');
+
+  // URL
   const [url, setUrl] = useState('');
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [result, setResult] = useState<AnalysisResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [urlRes, setUrlRes] = useState<AnalysisResult | null>(null);
+  const [urlLoading, setUrlLoading] = useState(false);
+  const [urlErr, setUrlErr] = useState<string | null>(null);
 
-  useEffect(() => {
-    const savedHistory = localStorage.getItem('phishguard_history');
-    if (savedHistory) {
-      try {
-        setHistory(JSON.parse(savedHistory));
-      } catch (e) {
-        console.error("Failed to load history", e);
-      }
-    }
-  }, []);
+  // Email
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [emailRes, setEmailRes] = useState<EmailAnalysisResult | null>(null);
+  const [emailLoading, setEmailLoading] = useState(false);
+  const [emailErr, setEmailErr] = useState<string | null>(null);
 
-  const saveToHistory = (url: string, result: AnalysisResult) => {
-    const newItem: HistoryItem = { url, result, timestamp: Date.now() };
-    const updatedHistory = [newItem, ...history.filter(item => item.url !== url)].slice(0, 10);
-    setHistory(updatedHistory);
-    localStorage.setItem('phishguard_history', JSON.stringify(updatedHistory));
-  };
+  const canSubmitUrl = url.trim().length > 0 && !urlLoading;
+  const canSubmitEmail = (subject.trim() || body.trim()) && !emailLoading;
 
-  const handleAnalyze = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!url || isAnalyzing) return;
+  async function submitUrl(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canSubmitUrl) return;
+    let u = url.trim();
+    if (!u.startsWith('http')) u = 'https://' + u;
+    try { new URL(u); } catch { setUrlErr('Please enter a valid URL'); return; }
+    setUrlLoading(true); setUrlErr(null); setUrlRes(null);
+    try { setUrlRes(await analyzeURL(u)); } catch (err: any) { setUrlErr(err.message || 'Analysis failed'); }
+    finally { setUrlLoading(false); }
+  }
 
-    // Basic URL validation
-    let processedUrl = url.trim();
-    if (!processedUrl.startsWith('http://') && !processedUrl.startsWith('https://')) {
-      processedUrl = 'https://' + processedUrl;
-    }
+  async function submitEmail(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canSubmitEmail) return;
+    setEmailLoading(true); setEmailErr(null); setEmailRes(null);
+    try { setEmailRes(await analyzeEmail(subject, body)); } catch (err: any) { setEmailErr(err.message || 'Analysis failed'); }
+    finally { setEmailLoading(false); }
+  }
 
-    try {
-      new URL(processedUrl);
-    } catch (e) {
-      setError('Please enter a valid URL');
-      return;
-    }
-
-    setIsAnalyzing(true);
-    setError(null);
-    setResult(null);
-
-    try {
-      const analysis = await analyzeURL(processedUrl);
-      setResult(analysis);
-      saveToHistory(processedUrl, analysis);
-    } catch (err: any) {
-      setError(err.message || 'An unexpected error occurred');
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
-
-  const clearHistory = () => {
-    setHistory([]);
-    localStorage.removeItem('phishguard_history');
-  };
-
-  const getThreatColor = (level: string) => {
-    switch (level) {
-      case 'Critical': return 'text-red-600 bg-red-50 border-red-200';
-      case 'High': return 'text-orange-600 bg-orange-50 border-orange-200';
-      case 'Medium': return 'text-yellow-600 bg-yellow-50 border-yellow-200';
-      case 'Low': return 'text-emerald-600 bg-emerald-50 border-emerald-200';
-      default: return 'text-slate-600 bg-slate-50 border-slate-200';
-    }
-  };
-
-  const getScoreColor = (score: number) => {
-    if (score >= 80) return 'bg-red-500';
-    if (score >= 50) return 'bg-orange-500';
-    if (score >= 20) return 'bg-yellow-500';
-    return 'bg-emerald-500';
-  };
+  function switchTab(t: Tab) {
+    setTab(t);
+    setUrlRes(null); setUrlErr(null);
+    setEmailRes(null); setEmailErr(null);
+  }
 
   return (
-    <div className="min-h-screen flex flex-col">
-      {/* Header */}
-      <header className="bg-white border-b border-slate-200 py-4 px-6 sticky top-0 z-50">
-        <div className="max-w-5xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="bg-indigo-600 p-2 rounded-lg">
-              <Shield className="text-white w-6 h-6" />
-            </div>
-            <h1 className="text-xl font-bold tracking-tight text-slate-900">PhishGuard <span className="text-indigo-600">AI</span></h1>
-          </div>
-          <div className="hidden sm:flex items-center gap-6 text-sm font-medium text-slate-500">
-            <a href="#how-it-works" className="hover:text-indigo-600 transition-colors">How it works</a>
-            <a href="#tips" className="hover:text-indigo-600 transition-colors">Safety Tips</a>
-          </div>
-        </div>
-      </header>
+    <div style={{ minHeight: '100vh', background: '#0a0a0a', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
 
-      <main className="flex-grow max-w-5xl mx-auto w-full px-6 py-12">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          
-          {/* Left Column: Analysis Tool */}
-          <div className="lg:col-span-2 space-y-8">
-            <section>
-              <h2 className="text-3xl font-bold text-slate-900 mb-2">URL Security Scanner</h2>
-              <p className="text-slate-500 mb-8">Paste a suspicious link below to analyze it for phishing attempts, spoofing, and malicious patterns.</p>
-              
-              <form onSubmit={handleAnalyze} className="relative group">
-                <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
-                  <Search className="w-5 h-5 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
-                </div>
-                <input 
-                  type="text"
-                  placeholder="https://example.com/login"
-                  className="w-full pl-12 pr-32 py-4 bg-white border border-slate-200 rounded-2xl shadow-sm input-focus text-lg"
+      {/* ── Heading ── */}
+      <motion.h1
+        initial={{ opacity: 0, y: -12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        style={{ fontSize: 28, fontWeight: 600, color: '#fff', marginBottom: 28, textAlign: 'center', letterSpacing: '-0.02em' }}
+      >
+        {tab === 'url' ? 'Check a suspicious URL.' : 'Analyze a suspicious email.'}
+      </motion.h1>
+
+      {/* ── Input card ── */}
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.1 }}
+        style={{ width: '100%', maxWidth: 520 }}
+      >
+        <AnimatePresence mode="wait">
+          {tab === 'url' ? (
+            <motion.form key="url-form" onSubmit={submitUrl} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <div className="input-card">
+                <input
+                  className="ghost-input"
+                  placeholder="Paste a URL to scan…"
                   value={url}
-                  onChange={(e) => setUrl(e.target.value)}
+                  onChange={e => { setUrl(e.target.value); setUrlErr(null); setUrlRes(null); }}
+                  style={{ marginBottom: 12 }}
+                  autoFocus
                 />
-                <button 
-                  type="submit"
-                  disabled={isAnalyzing || !url}
-                  className="absolute right-2 top-2 bottom-2 px-6 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white font-semibold rounded-xl transition-all flex items-center gap-2"
-                >
-                  {isAnalyzing ? (
-                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  ) : (
-                    <>
-                      Analyze
-                      <ArrowRight className="w-4 h-4" />
-                    </>
-                  )}
-                </button>
-              </form>
-              {error && (
-                <motion.p 
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="mt-3 text-red-500 text-sm flex items-center gap-1"
-                >
-                  <AlertTriangle className="w-4 h-4" />
-                  {error}
-                </motion.p>
-              )}
-            </section>
-
-            <AnimatePresence mode="wait">
-              {result ? (
-                <motion.div
-                  key="result"
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  className="space-y-6"
-                >
-                  {/* Result Header Card */}
-                  <div className={cn(
-                    "p-8 rounded-3xl border-2 flex flex-col md:flex-row items-center gap-8",
-                    result.isPhishing ? "bg-red-50 border-red-100" : "bg-emerald-50 border-emerald-100"
-                  )}>
-                    <div className={cn(
-                      "w-24 h-24 rounded-full flex items-center justify-center shrink-0",
-                      result.isPhishing ? "bg-red-100 text-red-600" : "bg-emerald-100 text-emerald-600"
-                    )}>
-                      {result.isPhishing ? <ShieldAlert size={48} /> : <ShieldCheck size={48} />}
-                    </div>
-                    
-                    <div className="flex-grow text-center md:text-left">
-                      <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 mb-2">
-                        <h3 className={cn(
-                          "text-2xl font-bold",
-                          result.isPhishing ? "text-red-900" : "text-emerald-900"
-                        )}>
-                          {result.isPhishing ? "Phishing Detected" : "Likely Safe"}
-                        </h3>
-                        <span className={cn(
-                          "px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider border",
-                          getThreatColor(result.threatLevel)
-                        )}>
-                          {result.threatLevel} Risk
-                        </span>
-                      </div>
-                      <p className="text-slate-600 mb-4 max-w-md">
-                        {result.isPhishing 
-                          ? `This URL shows strong indicators of a phishing attempt. Avoid entering any credentials or personal information.`
-                          : `Our analysis didn't find any obvious phishing patterns for this URL. However, always remain cautious.`}
-                      </p>
-                      
-                      <div className="flex items-center gap-4">
-                        <div className="flex-grow max-w-xs bg-slate-200 h-2 rounded-full overflow-hidden">
-                          <motion.div 
-                            initial={{ width: 0 }}
-                            animate={{ width: `${result.riskScore}%` }}
-                            className={cn("h-full", getScoreColor(result.riskScore))}
-                          />
-                        </div>
-                        <span className="text-sm font-bold text-slate-700">{result.riskScore}% Risk Score</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Detailed Breakdown */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="glass-card p-6">
-                      <h4 className="font-bold text-slate-900 mb-4 flex items-center gap-2">
-                        <AlertTriangle className="w-5 h-5 text-orange-500" />
-                        Risk Indicators
-                      </h4>
-                      <ul className="space-y-3">
-                        {result.reasons.map((reason, i) => (
-                          <li key={i} className="flex gap-3 text-sm text-slate-600">
-                            <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-slate-300 shrink-0" />
-                            {reason}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-
-                    <div className="glass-card p-6">
-                      <h4 className="font-bold text-slate-900 mb-4 flex items-center gap-2">
-                        <CheckCircle2 className="w-5 h-5 text-indigo-500" />
-                        Recommendations
-                      </h4>
-                      <ul className="space-y-3">
-                        {result.recommendations.map((rec, i) => (
-                          <li key={i} className="flex gap-3 text-sm text-slate-600">
-                            <ArrowRight className="mt-1 w-4 h-4 text-indigo-400 shrink-0" />
-                            {rec}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-
-                  {/* Domain Info */}
-                  <div className="glass-card p-6 border-l-4 border-l-indigo-500">
-                    <div className="flex items-start gap-4">
-                      <div className="p-3 bg-indigo-50 rounded-xl text-indigo-600">
-                        <Globe className="w-6 h-6" />
-                      </div>
-                      <div>
-                        <h4 className="font-bold text-slate-900 mb-1">Domain Analysis</h4>
-                        <p className="text-sm text-slate-500 mb-3">
-                          Domain: <span className="font-mono text-indigo-600 font-semibold">{result.domainInfo.domain}</span>
-                        </p>
-                        {result.domainInfo.isLikelySpoofed && (
-                          <div className="bg-red-50 text-red-700 px-4 py-3 rounded-xl text-sm flex items-center gap-3 border border-red-100">
-                            <Lock className="w-4 h-4 shrink-0" />
-                            <span>
-                              This domain appears to be spoofing <strong>{result.domainInfo.spoofedTarget}</strong>.
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </motion.div>
-              ) : isAnalyzing ? (
-                <motion.div
-                  key="loading"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="py-20 flex flex-col items-center justify-center text-center"
-                >
-                  <div className="relative w-20 h-20 mb-6">
-                    <div className="absolute inset-0 border-4 border-indigo-100 rounded-full" />
-                    <div className="absolute inset-0 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
-                    <Shield className="absolute inset-0 m-auto w-8 h-8 text-indigo-600 animate-pulse" />
-                  </div>
-                  <h3 className="text-xl font-bold text-slate-900 mb-2">Analyzing URL Patterns...</h3>
-                  <p className="text-slate-500 max-w-xs mx-auto">Our AI is checking for typosquatting, obfuscation, and known phishing signatures.</p>
-                </motion.div>
-              ) : (
-                <motion.div
-                  key="empty"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="py-20 border-2 border-dashed border-slate-200 rounded-3xl flex flex-col items-center justify-center text-center px-6"
-                >
-                  <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 mb-4">
-                    <Search size={32} />
-                  </div>
-                  <h3 className="text-lg font-bold text-slate-900 mb-1">Ready to Scan</h3>
-                  <p className="text-slate-500 max-w-sm">Enter a URL above to get a comprehensive security assessment and risk score.</p>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-
-          {/* Right Column: History & Tips */}
-          <div className="space-y-8">
-            {/* History Section */}
-            <section className="glass-card overflow-hidden">
-              <div className="p-5 border-b border-slate-100 flex items-center justify-between">
-                <h3 className="font-bold text-slate-900 flex items-center gap-2">
-                  <History className="w-4 h-4 text-slate-400" />
-                  Recent Scans
-                </h3>
-                {history.length > 0 && (
-                  <button 
-                    onClick={clearHistory}
-                    className="text-xs text-slate-400 hover:text-red-500 transition-colors flex items-center gap-1"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                    Clear
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Link2 size={13} /> URL Scanner
+                  </span>
+                  <button type="submit" disabled={!canSubmitUrl} className={`send-btn ${canSubmitUrl ? 'send-btn-active' : ''}`}>
+                    {urlLoading
+                      ? <svg className="spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+                      : <ArrowRight size={14} />}
                   </button>
+                </div>
+              </div>
+            </motion.form>
+          ) : (
+            <motion.form key="email-form" onSubmit={submitEmail} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <div className="input-card">
+                <input
+                  className="ghost-input"
+                  placeholder="Email subject…"
+                  value={subject}
+                  onChange={e => { setSubject(e.target.value); setEmailErr(null); setEmailRes(null); }}
+                  style={{ marginBottom: 8, fontSize: 14, fontWeight: 500 }}
+                  autoFocus
+                />
+                <div style={{ height: 1, background: 'rgba(255,255,255,0.07)', marginBottom: 8 }} />
+                <textarea
+                  className="ghost-input"
+                  placeholder="Paste email body here…"
+                  value={body}
+                  onChange={e => { setBody(e.target.value); setEmailErr(null); setEmailRes(null); }}
+                  rows={5}
+                  style={{ marginBottom: 12 }}
+                />
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Mail size={13} /> Email Analyzer
+                  </span>
+                  <button type="submit" disabled={!canSubmitEmail} className={`send-btn ${canSubmitEmail ? 'send-btn-active' : ''}`}>
+                    {emailLoading
+                      ? <svg className="spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+                      : <ArrowRight size={14} />}
+                  </button>
+                </div>
+              </div>
+            </motion.form>
+          )}
+        </AnimatePresence>
+
+        {/* ── Error ── */}
+        <AnimatePresence>
+          {(urlErr || emailErr) && (
+            <motion.div
+              initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#f87171', marginTop: 10, paddingLeft: 4 }}
+            >
+              <AlertTriangle size={13} />
+              {urlErr || emailErr}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* ── URL Result ── */}
+        <AnimatePresence>
+          {urlRes && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 260, damping: 22 }}
+              className="result-card"
+              style={{ marginTop: 12 }}
+            >
+              {/* Verdict row */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {urlRes.isPhishing
+                    ? <ShieldAlert size={18} style={{ color: '#f87171' }} />
+                    : <ShieldCheck size={18} style={{ color: '#34d399' }} />}
+                  <span style={{ fontWeight: 600, fontSize: 15 }}>
+                    {urlRes.isPhishing ? 'Phishing Detected' : 'Likely Safe'}
+                  </span>
+                </div>
+                <span className={`chip ${urlRes.isPhishing ? 'chip-danger' : 'chip-safe'}`}>
+                  {urlRes.threatLevel}
+                </span>
+              </div>
+
+              {/* Score bar */}
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 6 }}>
+                  <span>Risk Score</span>
+                  <span style={{ color: scoreColor(urlRes.riskScore), fontWeight: 600 }}>
+                    <Counter to={urlRes.riskScore} />%
+                  </span>
+                </div>
+                <div className="score-bar">
+                  <motion.div
+                    initial={{ width: 0 }}
+                    animate={{ width: `${urlRes.riskScore}%` }}
+                    transition={{ duration: 1.1, ease: [0.34, 1.56, 0.64, 1] }}
+                    style={{ height: '100%', background: scoreColor(urlRes.riskScore), borderRadius: 2 }}
+                  />
+                </div>
+              </div>
+
+              {/* Domain */}
+              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 14 }}>
+                Domain: <span style={{ color: 'rgba(255,255,255,0.75)', fontFamily: 'monospace' }}>{urlRes.domainInfo.domain}</span>
+                {urlRes.domainInfo.isLikelySpoofed && (
+                  <span style={{ color: '#f87171', marginLeft: 8 }}>↳ Spoofing {urlRes.domainInfo.spoofedTarget}</span>
                 )}
               </div>
-              <div className="divide-y divide-slate-50 max-h-[400px] overflow-y-auto">
-                {history.length > 0 ? (history.map((item, i) => (
-                  <button 
-                    key={i}
-                    onClick={() => {
-                      setUrl(item.url);
-                      setResult(item.result);
-                    }}
-                    className="w-full p-4 text-left hover:bg-slate-50 transition-colors group"
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className={cn(
-                        "text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border",
-                        item.result.isPhishing ? "text-red-600 border-red-100 bg-red-50" : "text-emerald-600 border-emerald-100 bg-emerald-50"
-                      )}>
-                        {item.result.isPhishing ? "Phishing" : "Safe"}
-                      </span>
-                      <span className="text-[10px] text-slate-400">{new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                    </div>
-                    <p className="text-sm text-slate-700 font-medium truncate group-hover:text-indigo-600 transition-colors">{item.url}</p>
-                  </button>
-                ))) : (
-                  <div className="p-8 text-center text-slate-400">
-                    <p className="text-xs">No recent scans</p>
-                  </div>
-                )}
-              </div>
-            </section>
 
-            {/* Quick Tips */}
-            <section id="tips" className="bg-indigo-900 rounded-3xl p-6 text-white shadow-lg shadow-indigo-200">
-              <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
-                <Info className="w-5 h-5 text-indigo-300" />
-                Safety Checklist
-              </h3>
-              <ul className="space-y-4">
-                <li className="flex gap-3">
-                  <div className="mt-1 p-1 bg-indigo-800 rounded-md shrink-0">
-                    <Lock className="w-3 h-3 text-indigo-300" />
-                  </div>
-                  <div className="text-sm">
-                    <p className="font-bold mb-0.5">Check for HTTPS</p>
-                    <p className="text-indigo-200 leading-relaxed">Legitimate sites use encryption. Look for the padlock icon.</p>
-                  </div>
-                </li>
-                <li className="flex gap-3">
-                  <div className="mt-1 p-1 bg-indigo-800 rounded-md shrink-0">
-                    <Globe className="w-3 h-3 text-indigo-300" />
-                  </div>
-                  <div className="text-sm">
-                    <p className="font-bold mb-0.5">Verify Domain Name</p>
-                    <p className="text-indigo-200 leading-relaxed">Watch for typos like <span className="font-mono text-white">g00gle.com</span> or <span className="font-mono text-white">paypa1.com</span>.</p>
-                  </div>
-                </li>
-                <li className="flex gap-3">
-                  <div className="mt-1 p-1 bg-indigo-800 rounded-md shrink-0">
-                    <AlertTriangle className="w-3 h-3 text-indigo-300" />
-                  </div>
-                  <div className="text-sm">
-                    <p className="font-bold mb-0.5">Sense of Urgency</p>
-                    <p className="text-indigo-200 leading-relaxed">Phishing often uses threats like "Your account will be suspended."</p>
-                  </div>
-                </li>
-              </ul>
-            </section>
-          </div>
-        </div>
-      </main>
+              {/* Reasons */}
+              {urlRes.reasons?.length > 0 && (
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Risk Indicators</div>
+                  <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 5 }}>
+                    {urlRes.reasons.map((r, i) => (
+                      <li key={i} style={{ fontSize: 13, color: 'rgba(255,255,255,0.65)', display: 'flex', gap: 8 }}>
+                        <span style={{ color: '#f87171', flexShrink: 0 }}>—</span>{r}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
-      {/* Footer */}
-      <footer className="bg-white border-t border-slate-200 py-12 px-6">
-        <div className="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-12">
-          <div>
-            <div className="flex items-center gap-2 mb-4">
-              <Shield className="text-indigo-600 w-5 h-5" />
-              <span className="font-bold text-slate-900">PhishGuard AI</span>
-            </div>
-            <p className="text-slate-500 text-sm max-w-sm leading-relaxed">
-              PhishGuard AI uses advanced machine learning and pattern recognition to identify malicious URLs before they can harm you. Our mission is to make the web safer for everyone.
-            </p>
-          </div>
-          <div id="how-it-works">
-            <h4 className="font-bold text-slate-900 mb-4">How it works</h4>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <p className="text-sm font-bold text-slate-700">Heuristic Analysis</p>
-                <p className="text-xs text-slate-500">Checking URL structure and domain age.</p>
+              {/* Recommendations */}
+              {urlRes.recommendations?.length > 0 && (
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Recommendations</div>
+                  <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 5 }}>
+                    {urlRes.recommendations.map((r, i) => (
+                      <li key={i} style={{ fontSize: 13, color: 'rgba(255,255,255,0.65)', display: 'flex', gap: 8 }}>
+                        <span style={{ color: '#34d399', flexShrink: 0 }}>→</span>{r}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* ── Email Result ── */}
+        <AnimatePresence>
+          {emailRes && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 260, damping: 22 }}
+              className="result-card"
+              style={{ marginTop: 12 }}
+            >
+              {/* Verdict row */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {emailRes.isPhishing
+                    ? <ShieldAlert size={18} style={{ color: '#f87171' }} />
+                    : <ShieldCheck size={18} style={{ color: '#34d399' }} />}
+                  <span style={{ fontWeight: 600, fontSize: 15 }}>
+                    {emailRes.isPhishing ? 'Phishing Email' : 'Looks Legitimate'}
+                  </span>
+                </div>
+                <span className={`chip ${emailRes.isPhishing ? 'chip-danger' : 'chip-safe'}`}>
+                  {emailRes.threatLevel}
+                </span>
               </div>
-              <div className="space-y-1">
-                <p className="text-sm font-bold text-slate-700">Brand Protection</p>
-                <p className="text-xs text-slate-500">Detecting impersonation of major brands.</p>
+
+              {/* Urgency score */}
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 6 }}>
+                  <span>Urgency Score</span>
+                  <span style={{ color: scoreColor(emailRes.urgencyScore), fontWeight: 600 }}>
+                    <Counter to={emailRes.urgencyScore} />%
+                  </span>
+                </div>
+                <div className="score-bar">
+                  <motion.div
+                    initial={{ width: 0 }}
+                    animate={{ width: `${emailRes.urgencyScore}%` }}
+                    transition={{ duration: 1.1, ease: [0.34, 1.56, 0.64, 1] }}
+                    style={{ height: '100%', background: scoreColor(emailRes.urgencyScore), borderRadius: 2 }}
+                  />
+                </div>
               </div>
-              <div className="space-y-1">
-                <p className="text-sm font-bold text-slate-700">AI Reasoning</p>
-                <p className="text-xs text-slate-500">LLM-powered threat assessment.</p>
-              </div>
-              <div className="space-y-1">
-                <p className="text-sm font-bold text-slate-700">Real-time Scoring</p>
-                <p className="text-xs text-slate-500">Instant risk calculation and feedback.</p>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div className="max-w-5xl mx-auto mt-12 pt-8 border-t border-slate-100 flex flex-col md:flex-row justify-between items-center gap-4">
-          <p className="text-xs text-slate-400">© 2026 PhishGuard AI. All rights reserved.</p>
-          <div className="flex gap-6">
-            <a href="#" className="text-xs text-slate-400 hover:text-indigo-600">Privacy Policy</a>
-            <a href="#" className="text-xs text-slate-400 hover:text-indigo-600">Terms of Service</a>
-          </div>
-        </div>
-      </footer>
+
+              {/* Impersonated brand */}
+              {emailRes.impersonatedBrand && (
+                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 12 }}>
+                  Impersonating: <span style={{ color: '#f87171', fontWeight: 600 }}>{emailRes.impersonatedBrand}</span>
+                </div>
+              )}
+
+              {/* Detected tricks */}
+              {emailRes.detectedTricks?.length > 0 && (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Techniques Detected</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {emailRes.detectedTricks.map((t, i) => <span key={i} className="trick">{t}</span>)}
+                  </div>
+                </div>
+              )}
+
+              {/* Reasons */}
+              {emailRes.reasons?.length > 0 && (
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Risk Indicators</div>
+                  <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 5 }}>
+                    {emailRes.reasons.map((r, i) => (
+                      <li key={i} style={{ fontSize: 13, color: 'rgba(255,255,255,0.65)', display: 'flex', gap: 8 }}>
+                        <span style={{ color: '#f87171', flexShrink: 0 }}>—</span>{r}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Suspicious links */}
+              {emailRes.suspiciousLinks?.length > 0 && (
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Suspicious Links</div>
+                  {emailRes.suspiciousLinks.map((l, i) => (
+                    <div key={i} style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', fontFamily: 'monospace', marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l}</div>
+                  ))}
+                </div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </motion.div>
+
+      {/* ── Tab bar (bottom) ── */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.3 }}
+        style={{ display: 'flex', gap: 4, marginTop: 36, padding: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: 9999, border: '1px solid rgba(255,255,255,0.08)' }}
+      >
+        <button className={`tab-pill ${tab === 'url' ? 'tab-pill-active' : 'tab-pill-inactive'}`} onClick={() => switchTab('url')}>
+          URL Scanner
+        </button>
+        <button className={`tab-pill ${tab === 'email' ? 'tab-pill-active' : 'tab-pill-inactive'}`} onClick={() => switchTab('email')}>
+          Email Analyzer
+        </button>
+      </motion.div>
+
     </div>
   );
 }
