@@ -1,0 +1,5 @@
+{
+  "name": "PhishGuard",
+  "description": "Intelligent phishing URL detection and risk analysis system powered by Gemini AI.",
+  "requestFramePermissions": []
+}
