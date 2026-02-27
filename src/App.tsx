@@ -1,350 +1,472 @@
-import React, { useState } from 'react';
-import { ArrowRight, Shield, ShieldAlert, ShieldCheck, AlertTriangle, Link2, Mail } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { analyzeURL, analyzeEmail, type AnalysisResult, type EmailAnalysisResult } from './services/geminiService';
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
-type Tab = 'url' | 'email';
+import React, { useState, useEffect } from 'react';
+import { 
+  ShieldAlert, 
+  ShieldCheck, 
+  Search, 
+  History, 
+  AlertTriangle, 
+  Info, 
+  ArrowRight,
+  Shield,
+  Lock,
+  Globe,
+  Trash2,
+  CheckCircle2,
+  Activity,
+  Zap,
+  ChevronRight,
+  Fingerprint,
+  Eye,
+  Radar,
+  Link as LinkIcon,
+  Server,
+  Calendar
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { clsx, type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
+import { analyzeURL, type AnalysisResult } from './services/geminiService';
 
-// Animated score counter
-function Counter({ to }: { to: number }) {
-  const [n, setN] = useState(0);
-  React.useEffect(() => {
-    let f: number;
-    const start = Date.now();
-    const dur = 1200;
-    const ease = (t: number) => 1 - Math.pow(1 - t, 3);
-    const tick = () => {
-      const t = Math.min((Date.now() - start) / dur, 1);
-      setN(Math.round(ease(t) * to));
-      if (t < 1) f = requestAnimationFrame(tick);
-    };
-    f = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(f);
-  }, [to]);
-  return <>{n}</>;
+function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
 }
 
-const scoreColor = (s: number) => s >= 70 ? '#f87171' : s >= 40 ? '#fbbf24' : '#34d399';
+interface HistoryItem {
+  url: string;
+  result: AnalysisResult;
+  timestamp: number;
+}
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>('url');
-
-  // URL
   const [url, setUrl] = useState('');
-  const [urlRes, setUrlRes] = useState<AnalysisResult | null>(null);
-  const [urlLoading, setUrlLoading] = useState(false);
-  const [urlErr, setUrlErr] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
 
-  // Email
-  const [subject, setSubject] = useState('');
-  const [body, setBody] = useState('');
-  const [emailRes, setEmailRes] = useState<EmailAnalysisResult | null>(null);
-  const [emailLoading, setEmailLoading] = useState(false);
-  const [emailErr, setEmailErr] = useState<string | null>(null);
+  useEffect(() => {
+    const savedHistory = localStorage.getItem('phishguard_history');
+    if (savedHistory) {
+      try {
+        setHistory(JSON.parse(savedHistory));
+      } catch (e) {
+        console.error("Failed to load history", e);
+      }
+    }
+  }, []);
 
-  const canSubmitUrl = url.trim().length > 0 && !urlLoading;
-  const canSubmitEmail = (subject.trim() || body.trim()) && !emailLoading;
+  const saveToHistory = (url: string, result: AnalysisResult) => {
+    const newItem: HistoryItem = { url, result, timestamp: Date.now() };
+    const updatedHistory = [newItem, ...history.filter(item => item.url !== url)].slice(0, 10);
+    setHistory(updatedHistory);
+    localStorage.setItem('phishguard_history', JSON.stringify(updatedHistory));
+  };
 
-  async function submitUrl(e: React.FormEvent) {
-    e.preventDefault();
-    if (!canSubmitUrl) return;
-    let u = url.trim();
-    if (!u.startsWith('http')) u = 'https://' + u;
-    try { new URL(u); } catch { setUrlErr('Please enter a valid URL'); return; }
-    setUrlLoading(true); setUrlErr(null); setUrlRes(null);
-    try { setUrlRes(await analyzeURL(u)); } catch (err: any) { setUrlErr(err.message || 'Analysis failed'); }
-    finally { setUrlLoading(false); }
-  }
+  const handleAnalyze = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!url || isAnalyzing) return;
 
-  async function submitEmail(e: React.FormEvent) {
-    e.preventDefault();
-    if (!canSubmitEmail) return;
-    setEmailLoading(true); setEmailErr(null); setEmailRes(null);
-    try { setEmailRes(await analyzeEmail(subject, body)); } catch (err: any) { setEmailErr(err.message || 'Analysis failed'); }
-    finally { setEmailLoading(false); }
-  }
+    let processedUrl = url.trim();
+    if (!processedUrl.startsWith('http://') && !processedUrl.startsWith('https://')) {
+      processedUrl = 'https://' + processedUrl;
+    }
 
-  function switchTab(t: Tab) {
-    setTab(t);
-    setUrlRes(null); setUrlErr(null);
-    setEmailRes(null); setEmailErr(null);
-  }
+    try {
+      new URL(processedUrl);
+    } catch (e) {
+      setError('Invalid URL format');
+      return;
+    }
+
+    setIsAnalyzing(true);
+    setError(null);
+    setResult(null);
+
+    try {
+      const analysis = await analyzeURL(processedUrl);
+      setResult(analysis);
+      saveToHistory(processedUrl, analysis);
+    } catch (err: any) {
+      setError(err.message || 'Analysis failed');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const getThreatColor = (level: string) => {
+    switch (level) {
+      case 'Critical': return 'text-red-400 bg-red-500/10 border-red-500/20';
+      case 'High': return 'text-orange-400 bg-orange-500/10 border-orange-500/20';
+      case 'Medium': return 'text-amber-400 bg-amber-500/10 border-amber-500/20';
+      case 'Low': return 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20';
+      default: return 'text-slate-400 bg-slate-500/10 border-slate-500/20';
+    }
+  };
 
   return (
-    <div style={{ minHeight: '100vh', background: '#0a0a0a', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
+    <div className="min-h-screen flex flex-col tech-grid p-6 md:p-12">
+      <div className="max-w-4xl mx-auto w-full space-y-12">
+        
+        {/* Header */}
+        <header className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+              <Shield className="text-white" size={24} />
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight text-white">PhishGuard</h1>
+          </div>
+          <button 
+            onClick={() => setShowHistory(!showHistory)}
+            className="p-2 text-slate-400 hover:text-white transition-colors"
+          >
+            <History size={24} />
+          </button>
+        </header>
 
-      {/* ── Heading ── */}
-      <motion.h1
-        initial={{ opacity: 0, y: -12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-        style={{ fontSize: 28, fontWeight: 600, color: '#fff', marginBottom: 28, textAlign: 'center', letterSpacing: '-0.02em' }}
-      >
-        {tab === 'url' ? 'Check a suspicious URL.' : 'Analyze a suspicious email.'}
-      </motion.h1>
+        {/* Scanner */}
+        <section className="space-y-8">
+          <div className="text-center space-y-2">
+            <h2 className="text-4xl md:text-5xl font-bold text-white tracking-tight">URL Security Audit</h2>
+            <p className="text-slate-400 text-lg">Deep-scan links for phishing, spoofing, and malicious patterns.</p>
+          </div>
 
-      {/* ── Input card ── */}
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, delay: 0.1 }}
-        style={{ width: '100%', maxWidth: 520 }}
-      >
+          <form onSubmit={handleAnalyze} className="relative group max-w-2xl mx-auto">
+            <div className="absolute inset-y-0 left-5 flex items-center pointer-events-none text-slate-500 group-focus-within:text-indigo-400 transition-colors">
+              <LinkIcon size={20} />
+            </div>
+            <input 
+              type="text"
+              placeholder="Paste suspicious URL here..."
+              className="w-full pl-14 pr-36 py-5 bg-slate-900/50 border border-slate-800 rounded-3xl text-lg text-white placeholder:text-slate-600 outline-none focus:border-indigo-500/50 focus:ring-4 focus:ring-indigo-500/5 transition-all"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+            />
+            <button 
+              type="submit"
+              disabled={isAnalyzing || !url}
+              className="absolute right-2 top-2 bottom-2 px-8 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white font-bold rounded-2xl transition-all flex items-center gap-2 shadow-lg shadow-indigo-500/10"
+            >
+              {isAnalyzing ? (
+                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : (
+                <>
+                  Scan
+                  <Zap size={18} fill="currentColor" />
+                </>
+              )}
+            </button>
+          </form>
+
+          {error && (
+            <motion.div 
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="max-w-2xl mx-auto p-4 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-400 text-sm flex items-center gap-3"
+            >
+              <AlertTriangle size={18} />
+              {error}
+            </motion.div>
+          )}
+        </section>
+
+        {/* Results */}
         <AnimatePresence mode="wait">
-          {tab === 'url' ? (
-            <motion.form key="url-form" onSubmit={submitUrl} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <div className="input-card">
-                <input
-                  className="ghost-input"
-                  placeholder="Paste a URL to scan…"
-                  value={url}
-                  onChange={e => { setUrl(e.target.value); setUrlErr(null); setUrlRes(null); }}
-                  style={{ marginBottom: 12 }}
-                  autoFocus
-                />
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <Link2 size={13} /> URL Scanner
-                  </span>
-                  <button type="submit" disabled={!canSubmitUrl} className={`send-btn ${canSubmitUrl ? 'send-btn-active' : ''}`}>
-                    {urlLoading
-                      ? <svg className="spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
-                      : <ArrowRight size={14} />}
-                  </button>
-                </div>
-              </div>
-            </motion.form>
-          ) : (
-            <motion.form key="email-form" onSubmit={submitEmail} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <div className="input-card">
-                <input
-                  className="ghost-input"
-                  placeholder="Email subject…"
-                  value={subject}
-                  onChange={e => { setSubject(e.target.value); setEmailErr(null); setEmailRes(null); }}
-                  style={{ marginBottom: 8, fontSize: 14, fontWeight: 500 }}
-                  autoFocus
-                />
-                <div style={{ height: 1, background: 'rgba(255,255,255,0.07)', marginBottom: 8 }} />
-                <textarea
-                  className="ghost-input"
-                  placeholder="Paste email body here…"
-                  value={body}
-                  onChange={e => { setBody(e.target.value); setEmailErr(null); setEmailRes(null); }}
-                  rows={5}
-                  style={{ marginBottom: 12 }}
-                />
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <Mail size={13} /> Email Analyzer
-                  </span>
-                  <button type="submit" disabled={!canSubmitEmail} className={`send-btn ${canSubmitEmail ? 'send-btn-active' : ''}`}>
-                    {emailLoading
-                      ? <svg className="spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
-                      : <ArrowRight size={14} />}
-                  </button>
-                </div>
-              </div>
-            </motion.form>
-          )}
-        </AnimatePresence>
-
-        {/* ── Error ── */}
-        <AnimatePresence>
-          {(urlErr || emailErr) && (
+          {result ? (
             <motion.div
-              initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#f87171', marginTop: 10, paddingLeft: 4 }}
+              key="result"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="space-y-8"
             >
-              <AlertTriangle size={13} />
-              {urlErr || emailErr}
-            </motion.div>
-          )}
-        </AnimatePresence>
+              {/* Main Result Card */}
+              <div className={cn(
+                "dark-panel p-8 md:p-12 relative overflow-hidden glow-indigo",
+                result.isPhishing ? "border-red-500/20" : "border-emerald-500/20"
+              )}>
+                <div className="flex flex-col md:flex-row items-center gap-10">
+                  <div className="relative shrink-0">
+                    <div className={cn(
+                      "w-32 h-32 rounded-full flex items-center justify-center",
+                      result.isPhishing ? "bg-red-500/10 text-red-500" : "bg-emerald-500/10 text-emerald-500"
+                    )}>
+                      {result.isPhishing ? <ShieldAlert size={64} /> : <ShieldCheck size={64} />}
+                    </div>
+                    <div className="absolute -bottom-2 -right-2 bg-slate-900 border border-slate-800 px-3 py-1 rounded-full shadow-xl">
+                      <span className="text-xs font-bold text-white tracking-widest uppercase">{result.riskScore}% Risk</span>
+                    </div>
+                  </div>
 
-        {/* ── URL Result ── */}
-        <AnimatePresence>
-          {urlRes && (
-            <motion.div
-              initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-              transition={{ type: 'spring', stiffness: 260, damping: 22 }}
-              className="result-card"
-              style={{ marginTop: 12 }}
-            >
-              {/* Verdict row */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  {urlRes.isPhishing
-                    ? <ShieldAlert size={18} style={{ color: '#f87171' }} />
-                    : <ShieldCheck size={18} style={{ color: '#34d399' }} />}
-                  <span style={{ fontWeight: 600, fontSize: 15 }}>
-                    {urlRes.isPhishing ? 'Phishing Detected' : 'Likely Safe'}
-                  </span>
-                </div>
-                <span className={`chip ${urlRes.isPhishing ? 'chip-danger' : 'chip-safe'}`}>
-                  {urlRes.threatLevel}
-                </span>
-              </div>
-
-              {/* Score bar */}
-              <div style={{ marginBottom: 14 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 6 }}>
-                  <span>Risk Score</span>
-                  <span style={{ color: scoreColor(urlRes.riskScore), fontWeight: 600 }}>
-                    <Counter to={urlRes.riskScore} />%
-                  </span>
-                </div>
-                <div className="score-bar">
-                  <motion.div
-                    initial={{ width: 0 }}
-                    animate={{ width: `${urlRes.riskScore}%` }}
-                    transition={{ duration: 1.1, ease: [0.34, 1.56, 0.64, 1] }}
-                    style={{ height: '100%', background: scoreColor(urlRes.riskScore), borderRadius: 2 }}
-                  />
-                </div>
-              </div>
-
-              {/* Domain */}
-              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 14 }}>
-                Domain: <span style={{ color: 'rgba(255,255,255,0.75)', fontFamily: 'monospace' }}>{urlRes.domainInfo.domain}</span>
-                {urlRes.domainInfo.isLikelySpoofed && (
-                  <span style={{ color: '#f87171', marginLeft: 8 }}>↳ Spoofing {urlRes.domainInfo.spoofedTarget}</span>
-                )}
-              </div>
-
-              {/* Reasons */}
-              {urlRes.reasons?.length > 0 && (
-                <div style={{ marginBottom: 10 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Risk Indicators</div>
-                  <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 5 }}>
-                    {urlRes.reasons.map((r, i) => (
-                      <li key={i} style={{ fontSize: 13, color: 'rgba(255,255,255,0.65)', display: 'flex', gap: 8 }}>
-                        <span style={{ color: '#f87171', flexShrink: 0 }}>—</span>{r}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Recommendations */}
-              {urlRes.recommendations?.length > 0 && (
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Recommendations</div>
-                  <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 5 }}>
-                    {urlRes.recommendations.map((r, i) => (
-                      <li key={i} style={{ fontSize: 13, color: 'rgba(255,255,255,0.65)', display: 'flex', gap: 8 }}>
-                        <span style={{ color: '#34d399', flexShrink: 0 }}>→</span>{r}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* ── Email Result ── */}
-        <AnimatePresence>
-          {emailRes && (
-            <motion.div
-              initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-              transition={{ type: 'spring', stiffness: 260, damping: 22 }}
-              className="result-card"
-              style={{ marginTop: 12 }}
-            >
-              {/* Verdict row */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  {emailRes.isPhishing
-                    ? <ShieldAlert size={18} style={{ color: '#f87171' }} />
-                    : <ShieldCheck size={18} style={{ color: '#34d399' }} />}
-                  <span style={{ fontWeight: 600, fontSize: 15 }}>
-                    {emailRes.isPhishing ? 'Phishing Email' : 'Looks Legitimate'}
-                  </span>
-                </div>
-                <span className={`chip ${emailRes.isPhishing ? 'chip-danger' : 'chip-safe'}`}>
-                  {emailRes.threatLevel}
-                </span>
-              </div>
-
-              {/* Urgency score */}
-              <div style={{ marginBottom: 14 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 6 }}>
-                  <span>Urgency Score</span>
-                  <span style={{ color: scoreColor(emailRes.urgencyScore), fontWeight: 600 }}>
-                    <Counter to={emailRes.urgencyScore} />%
-                  </span>
-                </div>
-                <div className="score-bar">
-                  <motion.div
-                    initial={{ width: 0 }}
-                    animate={{ width: `${emailRes.urgencyScore}%` }}
-                    transition={{ duration: 1.1, ease: [0.34, 1.56, 0.64, 1] }}
-                    style={{ height: '100%', background: scoreColor(emailRes.urgencyScore), borderRadius: 2 }}
-                  />
-                </div>
-              </div>
-
-              {/* Impersonated brand */}
-              {emailRes.impersonatedBrand && (
-                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 12 }}>
-                  Impersonating: <span style={{ color: '#f87171', fontWeight: 600 }}>{emailRes.impersonatedBrand}</span>
-                </div>
-              )}
-
-              {/* Detected tricks */}
-              {emailRes.detectedTricks?.length > 0 && (
-                <div style={{ marginBottom: 12 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Techniques Detected</div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {emailRes.detectedTricks.map((t, i) => <span key={i} className="trick">{t}</span>)}
+                  <div className="flex-grow text-center md:text-left space-y-4">
+                    <div className="flex flex-wrap items-center justify-center md:justify-start gap-3">
+                      <h3 className="text-3xl font-bold text-white tracking-tight">
+                        {result.isPhishing ? "Threat Detected" : "Likely Safe"}
+                      </h3>
+                      <span className={cn(
+                        "px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest border",
+                        getThreatColor(result.threatLevel)
+                      )}>
+                        {result.threatLevel} Risk
+                      </span>
+                    </div>
+                    <p className="text-slate-400 text-lg leading-relaxed max-w-2xl">
+                      {result.isPhishing 
+                        ? "This URL matches multiple phishing signatures. Our AI detected deceptive patterns designed to harvest credentials or sensitive data."
+                        : "No obvious phishing signatures detected. The URL structure and domain reputation appear consistent with legitimate services."}
+                    </p>
                   </div>
                 </div>
-              )}
+              </div>
 
-              {/* Reasons */}
-              {emailRes.reasons?.length > 0 && (
-                <div style={{ marginBottom: 10 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Risk Indicators</div>
-                  <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 5 }}>
-                    {emailRes.reasons.map((r, i) => (
-                      <li key={i} style={{ fontSize: 13, color: 'rgba(255,255,255,0.65)', display: 'flex', gap: 8 }}>
-                        <span style={{ color: '#f87171', flexShrink: 0 }}>—</span>{r}
-                      </li>
+              {/* Technical Breakdown */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="md:col-span-2 dark-panel p-6 space-y-6">
+                  <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                    <Shield size={14} className="text-indigo-400" />
+                    Threat Factor Breakdown
+                  </h4>
+                  <div className="grid grid-cols-1 gap-4">
+                    {result.threatBreakdown.map((item, i) => (
+                      <motion.div 
+                        key={i} 
+                        whileHover={{ scale: 1.01, backgroundColor: 'rgba(15, 23, 42, 0.5)' }}
+                        className="flex flex-col gap-2 p-4 bg-slate-950/30 border border-slate-800 rounded-2xl transition-all cursor-default hover:border-indigo-500/30"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-indigo-400 uppercase tracking-wider">{item.category}</span>
+                          <span className={cn(
+                            "text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded border",
+                            getThreatColor(item.severity)
+                          )}>
+                            {item.severity} Impact
+                          </span>
+                        </div>
+                        <p className="text-sm text-slate-300 leading-relaxed">{item.finding}</p>
+                      </motion.div>
                     ))}
-                  </ul>
+                  </div>
                 </div>
-              )}
 
-              {/* Suspicious links */}
-              {emailRes.suspiciousLinks?.length > 0 && (
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Suspicious Links</div>
-                  {emailRes.suspiciousLinks.map((l, i) => (
-                    <div key={i} style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', fontFamily: 'monospace', marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l}</div>
+                <div className="space-y-6">
+                  <div className="dark-panel p-6 space-y-4">
+                    <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                      <Activity size={14} className="text-indigo-400" />
+                      Technical Audit
+                    </h4>
+                    <div className="grid grid-cols-1 gap-2">
+                      {[
+                        { label: 'IP Address Host', value: result.technicalDetails.usesIpAddress, critical: true },
+                        { label: 'Punycode Attack', value: result.technicalDetails.hasPunycode, critical: true },
+                        { label: 'URL Shortener', value: result.technicalDetails.isShortened },
+                        { label: 'Suspicious TLD', value: result.technicalDetails.suspiciousTld },
+                        { label: 'Subdomain Spam', value: result.technicalDetails.excessiveSubdomains },
+                        { label: 'Hidden Redirects', value: result.technicalDetails.hiddenRedirects },
+                      ].map((detail, i) => (
+                        <div key={i} className={cn(
+                          "flex items-center justify-between p-2 rounded-lg border transition-colors",
+                          detail.value 
+                            ? (detail.critical ? "bg-red-500/10 border-red-500/20" : "bg-amber-500/10 border-amber-500/20") 
+                            : "bg-slate-950/30 border-slate-800/50"
+                        )}>
+                          <span className={cn("text-xs", detail.value ? "text-white font-medium" : "text-slate-400")}>{detail.label}</span>
+                          {detail.value ? (
+                            <AlertTriangle size={12} className={detail.critical ? "text-red-400" : "text-amber-400"} />
+                          ) : (
+                            <CheckCircle2 size={12} className="text-emerald-400" />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="dark-panel p-6 space-y-4">
+                    <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                      <Server size={14} className="text-indigo-400" />
+                      Domain Identity
+                    </h4>
+                    <div className="space-y-4">
+                      <div className="p-3 bg-slate-950/50 rounded-xl border border-slate-800">
+                        <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mb-1">Host</p>
+                        <p className="font-mono text-xs text-indigo-400 truncate">{result.domainInfo.domain}</p>
+                      </div>
+                      {result.domainInfo.ageEstimate && (
+                        <div className="flex items-center gap-2 text-xs text-slate-400">
+                          <Calendar size={12} />
+                          <span>Age: {result.domainInfo.ageEstimate}</span>
+                        </div>
+                      )}
+                      {result.domainInfo.isLikelySpoofed && (
+                        <div className="p-3 bg-red-500/5 border border-red-500/10 rounded-xl">
+                          <p className="text-[10px] font-bold text-red-400 uppercase tracking-widest mb-1">Spoofing Target</p>
+                          <p className="text-sm text-white font-bold">{result.domainInfo.spoofedTarget}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Recommendations */}
+              <div className="dark-panel p-8">
+                <h4 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
+                  <Shield size={20} className="text-indigo-400" />
+                  Security Recommendations
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {result.recommendations.map((rec, i) => (
+                    <div key={i} className="flex items-start gap-3 p-4 bg-slate-950/30 border border-slate-800 rounded-2xl">
+                      <div className="w-6 h-6 rounded-full bg-indigo-500/10 flex items-center justify-center shrink-0">
+                        <CheckCircle2 size={14} className="text-indigo-400" />
+                      </div>
+                      <p className="text-sm text-slate-400 leading-relaxed">{rec}</p>
+                    </div>
                   ))}
                 </div>
-              )}
+              </div>
+            </motion.div>
+          ) : isAnalyzing ? (
+            <motion.div
+              key="loading"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="py-32 flex flex-col items-center justify-center text-center space-y-8"
+            >
+              <div className="relative w-32 h-32">
+                <div className="absolute inset-0 border-4 border-slate-800 rounded-full" />
+                <motion.div 
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                  className="absolute inset-0 border-4 border-indigo-500 border-t-transparent rounded-full"
+                />
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <Radar className="text-indigo-500 w-12 h-12 animate-pulse" />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-2xl font-bold text-white">Auditing Security Patterns</h3>
+                <p className="text-slate-500 max-w-sm mx-auto">Evaluating domain reputation, SSL signatures, and heuristic anomalies...</p>
+              </div>
+            </motion.div>
+          ) : (
+            <motion.div
+              key="empty"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="py-40 dark-panel border-dashed border-2 flex flex-col items-center justify-center text-center px-6"
+            >
+              <div className="w-20 h-20 bg-slate-950/50 rounded-3xl flex items-center justify-center text-slate-700 mb-6 shadow-inner">
+                <Eye size={40} />
+              </div>
+              <h3 className="text-xl font-bold text-white mb-2">Ready for Analysis</h3>
+              <p className="text-slate-500 max-w-md mx-auto leading-relaxed">
+                Paste any URL to begin a deep-dive security audit. Our AI evaluates over 50 risk factors in real-time.
+              </p>
             </motion.div>
           )}
         </AnimatePresence>
-      </motion.div>
 
-      {/* ── Tab bar (bottom) ── */}
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.3 }}
-        style={{ display: 'flex', gap: 4, marginTop: 36, padding: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: 9999, border: '1px solid rgba(255,255,255,0.08)' }}
-      >
-        <button className={`tab-pill ${tab === 'url' ? 'tab-pill-active' : 'tab-pill-inactive'}`} onClick={() => switchTab('url')}>
-          URL Scanner
-        </button>
-        <button className={`tab-pill ${tab === 'email' ? 'tab-pill-active' : 'tab-pill-inactive'}`} onClick={() => switchTab('email')}>
-          Email Analyzer
-        </button>
-      </motion.div>
+        {/* History Overlay */}
+        <AnimatePresence>
+          {showHistory && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-6"
+              onClick={() => setShowHistory(false)}
+            >
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                className="w-full max-w-2xl dark-panel p-8 space-y-6 max-h-[80vh] overflow-hidden flex flex-col"
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                    <History className="text-indigo-400" />
+                    Scan History
+                  </h3>
+                  <button 
+                    onClick={() => {
+                      setHistory([]);
+                      localStorage.removeItem('phishguard_history');
+                    }}
+                    className="text-xs font-bold text-red-400 hover:text-red-300 transition-colors flex items-center gap-1"
+                  >
+                    <Trash2 size={14} />
+                    Clear All
+                  </button>
+                </div>
 
+                <div className="flex-grow overflow-y-auto space-y-3 pr-2">
+                  {history.length > 0 ? (
+                    history.map((item, i) => (
+                      <div 
+                        key={i}
+                        onClick={() => {
+                          setUrl(item.url);
+                          setResult(item.result);
+                          setShowHistory(false);
+                        }}
+                        className="p-4 bg-slate-950/50 border border-slate-800 rounded-2xl flex items-center justify-between group hover:border-indigo-500/30 transition-all cursor-pointer"
+                      >
+                        <div className="flex items-center gap-4 min-w-0">
+                          <div className={cn(
+                            "w-10 h-10 rounded-xl flex items-center justify-center shrink-0",
+                            item.result.isPhishing ? "bg-red-500/10 text-red-500" : "bg-emerald-500/10 text-emerald-500"
+                          )}>
+                            {item.result.isPhishing ? <ShieldAlert size={20} /> : <ShieldCheck size={20} />}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-bold text-white truncate group-hover:text-indigo-400 transition-colors">{item.url}</p>
+                            <p className="text-[10px] text-slate-500 uppercase tracking-widest mt-0.5">
+                              {new Date(item.timestamp).toLocaleDateString()} at {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                          </div>
+                        </div>
+                        <ChevronRight size={18} className="text-slate-700 group-hover:text-indigo-400 transition-colors" />
+                      </div>
+                    ))
+                  ) : (
+                    <div className="py-20 text-center space-y-4">
+                      <History size={48} className="text-slate-800 mx-auto" />
+                      <p className="text-slate-500">No recent scans found.</p>
+                    </div>
+                  )}
+                </div>
+
+                <button 
+                  onClick={() => setShowHistory(false)}
+                  className="w-full py-4 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-2xl transition-all"
+                >
+                  Close
+                </button>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Footer */}
+        <footer className="pt-12 border-t border-slate-800 flex flex-col md:flex-row justify-between items-center gap-6 text-slate-500 text-sm">
+          <div className="flex items-center gap-2">
+            <Shield size={16} className="text-indigo-500" />
+            <span className="font-bold text-slate-400">PhishGuard Security</span>
+          </div>
+          <div className="flex gap-8">
+            <a href="#" className="hover:text-indigo-400 transition-colors">Documentation</a>
+            <a href="#" className="hover:text-indigo-400 transition-colors">Privacy Policy</a>
+            <a href="#" className="hover:text-indigo-400 transition-colors">API Access</a>
+          </div>
+          <p>© 2026 Neural Security Labs</p>
+        </footer>
+      </div>
     </div>
   );
 }

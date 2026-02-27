@@ -1,110 +1,41 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 @import "tailwindcss";
 
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-html, body {
-  background: #0a0a0a;
-  color: #e8e8e8;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  min-height: 100vh;
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
-/* Scrollbar */
-::-webkit-scrollbar { width: 4px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
-
-/* Input card (like Chronicle) */
-.input-card {
-  background: #1a1a1a;
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 14px;
-  padding: 16px;
-}
-.input-card:focus-within {
-  border-color: rgba(255,255,255,0.2);
+body {
+  @apply bg-[#0B0F1A] text-slate-300 font-sans antialiased selection:bg-indigo-500/30 selection:text-white;
 }
 
-/* Ghost textarea / input */
-.ghost-input {
-  background: transparent;
-  border: none;
-  outline: none;
-  color: #e8e8e8;
-  width: 100%;
-  resize: none;
-  font-family: inherit;
-  font-size: 15px;
-  line-height: 1.6;
-  caret-color: #fff;
-}
-.ghost-input::placeholder { color: rgba(255,255,255,0.25); }
-
-/* Bottom tab bar */
-.tab-pill {
-  display: inline-flex;
-  align-items: center;
-  padding: 6px 16px;
-  border-radius: 9999px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  border: none;
-  transition: background 0.15s, color 0.15s;
-}
-.tab-pill-active {
-  background: rgba(255,255,255,0.12);
-  color: #fff;
-}
-.tab-pill-inactive {
-  background: transparent;
-  color: rgba(255,255,255,0.45);
-}
-.tab-pill-inactive:hover { color: rgba(255,255,255,0.75); }
-
-/* Send button */
-.send-btn {
-  width: 32px; height: 32px;
-  border-radius: 50%;
-  background: rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.15);
-  color: rgba(255,255,255,0.6);
-  display: flex; align-items: center; justify-content: center;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-  flex-shrink: 0;
-}
-.send-btn:hover { background: rgba(255,255,255,0.15); color: #fff; }
-.send-btn-active {
-  background: #fff;
-  color: #000;
-  border-color: #fff;
-}
-.send-btn-active:hover { background: #e8e8e8; }
-.send-btn:disabled { opacity: 0.3; cursor: not-allowed; }
-
-/* Result card */
-.result-card {
-  background: #1a1a1a;
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 12px;
-  padding: 16px;
+.dark-panel {
+  @apply bg-slate-900/40 backdrop-blur-xl border border-slate-800/50 shadow-2xl rounded-3xl;
 }
 
-/* Status chip */
-.chip-safe     { background: rgba(52,211,153,0.1); color: #6ee7b7; border: 1px solid rgba(52,211,153,0.2); }
-.chip-danger   { background: rgba(239,68,68,0.1);  color: #fca5a5; border: 1px solid rgba(239,68,68,0.2); }
-.chip-medium   { background: rgba(251,191,36,0.1); color: #fde68a; border: 1px solid rgba(251,191,36,0.2); }
-.chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 9999px; font-size: 12px; font-weight: 600; }
+.tech-grid {
+  background-image: radial-gradient(circle at 1px 1px, #1e293b 0.5px, transparent 0);
+  background-size: 32px 32px;
+}
 
-/* Trick badge */
-.trick { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); color: rgba(255,255,255,0.7); font-size: 11px; padding: 3px 10px; border-radius: 9999px; }
+.glow-indigo {
+  box-shadow: 0 0 80px -20px rgba(99, 102, 241, 0.15);
+}
 
-/* Score bar */
-.score-bar { height: 3px; background: rgba(255,255,255,0.08); border-radius: 2px; overflow: hidden; }
+.input-dark {
+  @apply bg-slate-950/50 border border-slate-800 focus:border-indigo-500/50 focus:ring-4 focus:ring-indigo-500/5 outline-none transition-all;
+}
 
-/* Spin */
-@keyframes spin { to { transform: rotate(360deg); } }
-.spin { animation: spin 0.8s linear infinite; }
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-800 rounded-full hover:bg-slate-700 transition-colors;
+}
