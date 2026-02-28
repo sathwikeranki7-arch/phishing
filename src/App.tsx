@@ -309,6 +309,45 @@ export default function App() {
                       )}
                     </div>
                   </div>
+
+                  <div className="dark-panel p-6 space-y-4">
+                    <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                      <Globe size={14} className="text-indigo-400" />
+                      Network Intelligence
+                    </h4>
+                    <div className="space-y-4">
+                      {result.networkIntelligence ? (
+                        <>
+                          <div className="p-3 bg-slate-950/50 rounded-xl border border-slate-800">
+                            <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mb-1">IP Address</p>
+                            <p className="font-mono text-xs text-indigo-400">{result.networkIntelligence.ipAddress}</p>
+                          </div>
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-slate-500">Location</span>
+                              <span className="text-slate-300">{result.networkIntelligence.location}</span>
+                            </div>
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-slate-500">ISP</span>
+                              <span className="text-slate-300 truncate max-w-[120px]">{result.networkIntelligence.isp}</span>
+                            </div>
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-slate-500">Reputation</span>
+                              <span className={cn(
+                                "font-bold",
+                                result.networkIntelligence.reputation === 'Malicious' ? 'text-red-400' : 
+                                result.networkIntelligence.reputation === 'Suspicious' ? 'text-amber-400' : 'text-emerald-400'
+                              )}>
+                                {result.networkIntelligence.reputation}
+                              </span>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <p className="text-xs text-slate-500 italic">Gathering network data...</p>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
 
